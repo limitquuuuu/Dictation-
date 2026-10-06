@@ -19,12 +19,16 @@ if "words" not in st.session_state:
     st.session_state.words = []
 if "current_idx" not in st.session_state:
     st.session_state.current_idx = 0
+if "show_answer" not in st.session_state:
+    st.session_state.show_answer = False
 
 # --- 側邊欄：設定與檔案上傳 ---
 with st.sidebar:
     st.header("⚙️ 設定與檔案上傳")
     
     uploaded_file = st.file_uploader("上傳默書文件 (.docx)", type=["docx"])
+    
+    mode = st.radio("選擇練習模式", ["家長/聽寫模式 (顯示答案)", "學生自習模式 (隱藏答案)"])
     
     lang_choice = st.selectbox(
         "選擇語言模式",
@@ -48,26 +52,18 @@ if uploaded_file is not None:
         if not text:
             continue
             
-        if "英文" in lang_choice:
-            # 依換行或點號分割英文單字/句子
-            lines = re.split(r'[\n\r]+', text)
-            for line in lines:
-                cleaned = line.strip()
-                if cleaned:
-                    extracted_words.append(cleaned)
-        else:
-            # 中文模式：提取詞組或句子
-            lines = re.split(r'[\n\r]+', text)
-            for line in lines:
-                cleaned = line.strip()
-                if cleaned:
-                    extracted_words.append(cleaned)
+        lines = re.split(r'[\n\r]+', text)
+        for line in lines:
+            cleaned = line.strip()
+            if cleaned:
+                extracted_words.append(cleaned)
 
     if extracted_words:
         # 當上傳新檔案時重置詞庫與索引
         if st.session_state.words != extracted_words:
             st.session_state.words = extracted_words
             st.session_state.current_idx = 0
+            st.session_state.show_answer = False
             st.rerun()
 
 # --- 主要內容顯示區 ---
@@ -80,21 +76,24 @@ if st.session_state.words:
     st.progress((curr_idx + 1) / total_words)
     st.caption(f"進度：第 {curr_idx + 1} / {total_words} 題")
 
-    # 題目卡片
-    st.markdown(f"### 🎯 當前題目：**{current_word}**")
+    # 題目卡片顯示（依據模式顯示或遮蔽答案）
+    if "家長" in mode or st.session_state.show_answer:
+        st.markdown(f"### 🎯 當前題目：**{current_word}**")
+    else:
+        st.markdown("### 🎯 當前題目：**🙈 [答案已隱藏]**")
+        if st.button("👁️ 顯示/揭曉答案"):
+            st.session_state.show_answer = True
+            st.rerun()
 
     # 判斷語言代碼
     lang_code = 'en' if "英文" in lang_choice else 'zh-CN'
-    
-    # 準備發音文字（若為英文且包含多個單字可做細部處理，這裡直接傳入完整文字）
     full_speech_text = current_word
 
-    # 🎯 針對 iOS Safari 深度優化的音訊元件
+    # 🎯 針對 iOS Safari 優化的 HTML5 音訊控制元件
     try:
         temp_dir = tempfile.gettempdir()
         audio_path = os.path.join(temp_dir, "dictation_current.mp3")
         
-        # 產生語音檔
         if lang_code == 'en':
             tts = gTTS(text=full_speech_text, lang=lang_code, tld=tld_code, slow=not speed_fast)
         else:
@@ -102,12 +101,11 @@ if st.session_state.words:
             
         tts.save(audio_path)
         
-        # 轉碼為 Base64 嵌入 HTML
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
             b64_audio = base64.b64encode(audio_bytes).decode()
 
-        # 生成毫秒級唯一 Key，強制 iOS Safari 重新渲染 Audio DOM，避免快取衝突
+        # 生成獨立唯一 ID 供 JS 識別 DOM
         unique_id = f"{curr_idx}_{int(time.time()*1000)}"
 
         html_code = f"""
@@ -116,7 +114,6 @@ if st.session_state.words:
                 <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
             </audio>
             
-            <!-- 原生 JS 重複播放按鈕（直接響應使用者點擊事件，突破 iOS 自動播放限制） -->
             <button onclick="playLocalAudio()" style="margin-top: 10px; width: 100%; padding: 12px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                 🔊 重複發音 (Replay)
             </button>
@@ -128,19 +125,18 @@ if st.session_state.words:
                 if (audio) {{
                     audio.currentTime = 0;
                     audio.play().catch(function(err) {{
-                        console.log("Play blocked/failed:", err);
+                        console.log("Play failed:", err);
                     }});
                 }}
             }}
 
-            // 頁面加載完成後延遲嘗試自動播放
             setTimeout(function() {{
                 playLocalAudio();
             }}, 300);
         </script>
         """
-        # 傳入獨立 key 確保每次切換題目時 Streamlit 徹底重構此 HTML 元件
-        components.html(html_code, height=120, key=f"comp_{unique_id}")
+        # 注意：此處已移除有問題的 key 參數
+        components.html(html_code, height=120)
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
@@ -153,11 +149,13 @@ if st.session_state.words:
     with col1:
         if st.button("⬅️ 上一個", use_container_width=True, disabled=(curr_idx == 0)):
             st.session_state.current_idx -= 1
+            st.session_state.show_answer = False
             st.rerun()
 
     with col2:
         if st.button("下一個 ➡️", use_container_width=True, disabled=(curr_idx == total_words - 1)):
             st.session_state.current_idx += 1
+            st.session_state.show_answer = False
             st.rerun()
 
 else:
