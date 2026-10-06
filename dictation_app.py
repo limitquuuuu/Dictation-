@@ -356,7 +356,7 @@ if st.session_state.flattened_items:
     with col2:
         if st.button("🔁 重複當前短句", use_container_width=True):
             st.session_state.play_full_sentence = False
-            st.session_state.trigger_replay = True  # 標記需要直接執行 JavaScript Play
+            st.session_state.trigger_replay = True
             st.rerun()
 
     with col3:
@@ -434,7 +434,7 @@ if st.session_state.flattened_items:
                 col_target = cols[idx % len(cols)]
                 
                 is_selected = (flat_i == st.session_state.current_index and not st.session_state.play_full_sentence)
-                btn_label = f"🔊 {s_item['spoken']}" if is_selected else f"▶️ {s_item['spoken']}"
+                btn_label = f"🔊 {s_item['spoken']}" if is_selected else f"▶️️ {s_item['spoken']}"
                 if col_target.button(btn_label, key=f"chunk_btn_{flat_i}"):
                     st.session_state.current_index = flat_i
                     st.session_state.play_full_sentence = False
@@ -444,7 +444,7 @@ if st.session_state.flattened_items:
     # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-    # 🎯 原生 HTML5 音訊控制元件（Base64 記憶體直接載入 + JS 自動觸發）
+    # 🎯 針對 iOS Safari 深度優化的音訊元件 (Base64 + 動態 Key + 原生 Replay 按鈕)
     try:
         temp_dir = tempfile.gettempdir()
         audio_path = os.path.join(temp_dir, "dictation_current.mp3")
@@ -460,25 +460,40 @@ if st.session_state.flattened_items:
             audio_bytes = f.read()
             b64_audio = base64.b64encode(audio_bytes).decode()
 
-        # 透過 JavaScript 直接操作播放器 DOM
-        should_force_play = "true" if st.session_state.trigger_replay else "false"
-        st.session_state.trigger_replay = False # 讀取後重置
+        # 生成毫秒級唯一 ID 避免 iOS 聲音快取
+        unique_id = f"{st.session_state.current_index}_{int(time.time()*1000)}"
+        st.session_state.trigger_replay = False  # 讀取後重置
 
         html_code = f"""
-        <audio id="my_dictation_audio" controls style="width: 100%;">
-            <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
-        </audio>
+        <div style="width: 100%; text-align: center;">
+            <audio id="audio_{unique_id}" controls playsinline webkit-playsinline style="width: 100%;">
+                <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+            </audio>
+            
+            <button onclick="playLocalAudio()" style="margin-top: 8px; width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer;">
+                🔊 重複發音 (Replay)
+            </button>
+        </div>
+
         <script>
-            var audio = document.getElementById('my_dictation_audio');
-            if (audio) {{
-                audio.currentTime = 0;
-                audio.play().catch(function(error) {{
-                    console.log("Autoplay is prevented or waiting for interaction:", error);
-                }});
+            function playLocalAudio() {{
+                var audio = document.getElementById('audio_{unique_id}');
+                if (audio) {{
+                    audio.currentTime = 0;
+                    audio.play().catch(function(err) {{
+                        console.log("iOS Play prevented or waiting for interaction:", err);
+                    }});
+                }}
             }}
+
+            // DOM 渲染完成後延遲自動播放
+            setTimeout(function() {{
+                playLocalAudio();
+            }}, 250);
         </script>
         """
-        components.html(html_code, height=65)
+        # 注意：components.html 不可傳入 key 參數，避免引發 Invalid Argument Error
+        components.html(html_code, height=115)
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
