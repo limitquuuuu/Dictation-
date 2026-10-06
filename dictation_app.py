@@ -444,7 +444,7 @@ if st.session_state.flattened_items:
     # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-# 🎯 原生 HTML5 音訊控制元件（加強英文短音訊的 Autoplay 突破）
+# 🎯 針對 iOS Safari 優化的 HTML5 音訊控制元件
     try:
         temp_dir = tempfile.gettempdir()
         audio_path = os.path.join(temp_dir, "dictation_current.mp3")
@@ -460,13 +460,12 @@ if st.session_state.flattened_items:
             audio_bytes = f.read()
             b64_audio = base64.b64encode(audio_bytes).decode()
 
-        # 產生一個隨機 key 避免 iframe 快取不更新
         import random
         audio_key = random.randint(10000, 99999)
 
         html_code = f"""
-        <div id="audio-container-{audio_key}">
-            <audio id="my_dictation_audio" controls style="width: 100%;">
+        <div id="audio-container-{audio_key}" style="width: 100%;">
+            <audio id="my_dictation_audio" controls playsinline style="width: 100%;">
                 <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
             </audio>
         </div>
@@ -475,32 +474,41 @@ if st.session_state.flattened_items:
                 var audio = document.getElementById('my_dictation_audio');
                 if (!audio) return;
 
-                // 強制重置播放進度
+                // 強制載入並重置進度
+                audio.load();
                 audio.currentTime = 0;
 
-                // 定義播放函數
-                function doPlay() {{
+                // 嘗試自動播放
+                var playAudio = function() {{
                     var promise = audio.play();
                     if (promise !== undefined) {{
-                        promise.then(function() {{
-                            // 播放成功
-                        }}).catch(function(error) {{
-                            console.log("Autoplay blocked, user interaction required:", error);
+                        promise.catch(function(error) {{
+                            console.log("iOS Autoplay prevented:", error);
                         }});
                     }}
+                }};
+
+                // 微幅延遲確保 iOS 解碼完畢
+                setTimeout(playAudio, 150);
+
+                // 綁定全域 Touch/Click 事件：解鎖 iOS AudioContext 靜音限制
+                function unlockAudio() {{
+                    audio.play().then(function() {{
+                        // 解鎖成功
+                    }}).catch(function(e) {{}});
+                    document.removeEventListener('touchstart', unlockAudio);
+                    document.removeEventListener('click', unlockAudio);
                 }}
 
-                // 針對英文短音訊：延遲 100ms 等待 DOM 與 Base64 解碼完全就緒
-                setTimeout(doPlay, 100);
+                document.addEventListener('touchstart', unlockAudio, false);
+                document.addEventListener('click', unlockAudio, false);
             }})();
         </script>
         """
-        # 稍微增加 height 避免被截斷
-        components.html(html_code, height=75)
+        components.html(html_code, height=65)
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
-
     if not is_student_mode:
         with st.expander("👁️ 檢視完整默書清單"):
             grid_cols = st.columns(3)
