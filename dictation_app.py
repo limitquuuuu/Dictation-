@@ -498,6 +498,7 @@ if st.session_state.flattened_items:
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
+
     if not is_student_mode:
         with st.expander("👁️ 檢視完整默書清單"):
             grid_cols = st.columns(3)
