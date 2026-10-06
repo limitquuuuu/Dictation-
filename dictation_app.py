@@ -444,7 +444,7 @@ if st.session_state.flattened_items:
     # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-# 🎯 針對 iOS Safari 優化的 HTML5 音訊控制元件
+# 🎯 針對 iOS Safari 深度優化的音訊元件
     try:
         temp_dir = tempfile.gettempdir()
         audio_path = os.path.join(temp_dir, "dictation_current.mp3")
@@ -460,52 +460,41 @@ if st.session_state.flattened_items:
             audio_bytes = f.read()
             b64_audio = base64.b64encode(audio_bytes).decode()
 
-        import random
-        audio_key = random.randint(10000, 99999)
+        # 使用當前題目索引 + 隨機數作為唯一 Key，防止 iOS 使用快取
+        import time
+        unique_id = f"{st.session_state.current_idx}_{int(time.time()*1000)}"
 
         html_code = f"""
-        <div id="audio-container-{audio_key}" style="width: 100%;">
-            <audio id="my_dictation_audio" controls playsinline style="width: 100%;">
+        <div style="width: 100%; text-align: center;">
+            <audio id="audio_{unique_id}" controls playsinline webkit-playsinline style="width: 100%;">
                 <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
             </audio>
+            
+            <!-- 原生 JS 重複播放按鈕（iOS 相容性最高，不需經過 Streamlit 重整） -->
+            <button onclick="playLocalAudio()" style="margin-top: 8px; width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; font-size: 16px; font-weight: bold;">
+                🔊 重複發音 (Replay)
+            </button>
         </div>
+
         <script>
-            (function() {{
-                var audio = document.getElementById('my_dictation_audio');
-                if (!audio) return;
-
-                // 強制載入並重置進度
-                audio.load();
-                audio.currentTime = 0;
-
-                // 嘗試自動播放
-                var playAudio = function() {{
-                    var promise = audio.play();
-                    if (promise !== undefined) {{
-                        promise.catch(function(error) {{
-                            console.log("iOS Autoplay prevented:", error);
-                        }});
-                    }}
-                }};
-
-                // 微幅延遲確保 iOS 解碼完畢
-                setTimeout(playAudio, 150);
-
-                // 綁定全域 Touch/Click 事件：解鎖 iOS AudioContext 靜音限制
-                function unlockAudio() {{
-                    audio.play().then(function() {{
-                        // 解鎖成功
-                    }}).catch(function(e) {{}});
-                    document.removeEventListener('touchstart', unlockAudio);
-                    document.removeEventListener('click', unlockAudio);
+            function playLocalAudio() {{
+                var audio = document.getElementById('audio_{unique_id}');
+                if (audio) {{
+                    audio.currentTime = 0;
+                    audio.play().catch(function(err) {{
+                        console.log("Play failed:", err);
+                    }});
                 }}
+            }}
 
-                document.addEventListener('touchstart', unlockAudio, false);
-                document.addEventListener('click', unlockAudio, false);
-            }})();
+            // 頁面渲染完畢後嘗試自動播放
+            setTimeout(function() {{
+                playLocalAudio();
+            }}, 300);
         </script>
         """
-        components.html(html_code, height=65)
+        # 傳遞 key 讓 Streamlit 在切換題目時徹底重繪此 HTML 元件
+        components.html(html_code, height=110, key=f"comp_{unique_id}")
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
