@@ -1,6 +1,5 @@
 import streamlit as st
 import docx
-import gTTS
 from gtts import gTTS
 import tempfile
 import os
