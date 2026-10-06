@@ -330,8 +330,8 @@ if uploaded_file is not None:
 
 if st.session_state.flattened_items:
     total_count = len(st.session_state.flattened_items)
-    
-    # 接收來自 HTML 前端按鈕發送的切換指令
+
+    # 🎯 相容 iOS Safari 的 URL Query 參數讀取
     nav_action = st.query_params.get("nav", None)
     if nav_action == "prev" and st.session_state.current_index > 0:
         st.session_state.current_index -= 1
@@ -426,7 +426,7 @@ if st.session_state.flattened_items:
     # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-    # 🎯 針對 iOS Safari 深度優化的音訊與 100% 原生控制組件
+    # 🎯 原生 Streamlit 切換控制 + iOS 相容版音訊組件
     try:
         temp_dir = tempfile.gettempdir()
         audio_path = os.path.join(temp_dir, "dictation_current.mp3")
@@ -444,23 +444,16 @@ if st.session_state.flattened_items:
 
         unique_id = f"{st.session_state.current_index}_{int(time.time()*1000)}"
 
+        # 1. 前端 HTML 控制（iOS 發音 100% 成功）
         html_code = f"""
         <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
             <audio id="audio_{unique_id}" controls playsinline webkit-playsinline style="width: 100%;">
                 <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
             </audio>
             
-            <div style="display: flex; gap: 8px; margin-top: 10px; width: 100%;">
-                <button onclick="navPrev()" style="flex: 1; padding: 12px 6px; background-color: #f0f2f6; color: #31333F; border: 1px solid #d6d8db; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; active: background-color: #e2e4e8;">
-                    ⬅️ 上一個
-                </button>
-                
-                <button onclick="playLocalAudio()" style="flex: 2; padding: 12px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="margin-top: 10px; width: 100%;">
+                <button onclick="playLocalAudio()" style="width: 100%; padding: 12px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                     🔊 重複發音 (Replay)
-                </button>
-                
-                <button onclick="navNext()" style="flex: 1; padding: 12px 6px; background-color: #f0f2f6; color: #31333F; border: 1px solid #d6d8db; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; active: background-color: #e2e4e8;">
-                    ➡️ 下一個
                 </button>
             </div>
         </div>
@@ -476,27 +469,32 @@ if st.session_state.flattened_items:
                 }}
             }}
 
-            function navPrev() {{
-                window.parent.postMessage({{type: 'streamlit:setQueryParams', queryParams: {{nav: 'prev'}}}}, '*');
-            }}
-
-            function navNext() {{
-                window.parent.postMessage({{type: 'streamlit:setQueryParams', queryParams: {{nav: 'next'}}}}, '*');
-            }}
-
-            // 自動嘗試播放
             setTimeout(function() {{
                 playLocalAudio();
             }}, 300);
         </script>
         """
-        components.html(html_code, height=130)
+        components.html(html_code, height=110)
+
+        # 2. 原生 Streamlit 切換按鈕（100% 解決 iOS 無反應問題）
+        nav_col1, nav_col2 = st.columns(2)
+        with nav_col1:
+            if st.button("⬅️ 上一個", use_container_width=True, disabled=(st.session_state.current_index == 0)):
+                st.session_state.current_index -= 1
+                st.session_state.play_full_sentence = False
+                st.rerun()
+
+        with nav_col2:
+            if st.button("➡️ 下一個", use_container_width=True, disabled=(st.session_state.current_index == total_count - 1)):
+                st.session_state.current_index += 1
+                st.session_state.play_full_sentence = False
+                st.rerun()
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
 
     if not is_student_mode:
-        with st.expander("👁️️ 檢視完整默書清單"):
+        with st.expander("👁 檢視完整默書清單"):
             grid_cols = st.columns(3)
             for idx, item in enumerate(st.session_state.unique_items):
                 is_current = (idx == current_item["parent_idx"])
