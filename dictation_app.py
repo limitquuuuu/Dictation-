@@ -119,8 +119,6 @@ if "last_mode" not in st.session_state:
     st.session_state.last_mode = None
 if "play_full_sentence" not in st.session_state:
     st.session_state.play_full_sentence = False
-if "trigger_replay" not in st.session_state:
-    st.session_state.trigger_replay = False
 
 # --------------------------------------------------
 # 側邊欄：設定與檔案上傳
@@ -333,6 +331,19 @@ if uploaded_file is not None:
 if st.session_state.flattened_items:
     total_count = len(st.session_state.flattened_items)
     
+    # 接收來自 HTML 前端按鈕發送的切換指令
+    nav_action = st.query_params.get("nav", None)
+    if nav_action == "prev" and st.session_state.current_index > 0:
+        st.session_state.current_index -= 1
+        st.session_state.play_full_sentence = False
+        st.query_params.clear()
+        st.rerun()
+    elif nav_action == "next" and st.session_state.current_index < total_count - 1:
+        st.session_state.current_index += 1
+        st.session_state.play_full_sentence = False
+        st.query_params.clear()
+        st.rerun()
+
     if st.session_state.current_index >= total_count:
         st.session_state.current_index = 0
         
@@ -386,7 +397,6 @@ if st.session_state.flattened_items:
         if item_type in ["句子", "段落"]:
             if st.button(f"🔊 朗讀完整【第 {item_no} {display_type_name}】", type="primary"):
                 st.session_state.play_full_sentence = True
-                st.session_state.trigger_replay = False
                 st.rerun()
                 
         st.warning("🔒 已隱藏默書文字，請仔細聆聽發音並默寫。")
@@ -397,7 +407,6 @@ if st.session_state.flattened_items:
         if item_type in ["句子", "段落"]:
             if st.button(f"🔊 朗讀完整【第 {item_no} {display_type_name}】", type="primary"):
                 st.session_state.play_full_sentence = True
-                st.session_state.trigger_replay = False
                 st.rerun()
             
             st.write("👇 **點擊分段朗讀：**")
@@ -412,13 +421,12 @@ if st.session_state.flattened_items:
                 if col_target.button(btn_label, key=f"chunk_btn_{flat_i}"):
                     st.session_state.current_index = flat_i
                     st.session_state.play_full_sentence = False
-                    st.session_state.trigger_replay = False
                     st.rerun()
 
     # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-    # 🎯 針對 iOS Safari 深度優化的音訊元件 (Base64 + 底部整合控制區)
+    # 🎯 針對 iOS Safari 深度優化的音訊與 100% 原生控制組件
     try:
         temp_dir = tempfile.gettempdir()
         audio_path = os.path.join(temp_dir, "dictation_current.mp3")
@@ -434,15 +442,27 @@ if st.session_state.flattened_items:
             audio_bytes = f.read()
             b64_audio = base64.b64encode(audio_bytes).decode()
 
-        # 生成毫秒級唯一 ID 避免 iOS 聲音快取
         unique_id = f"{st.session_state.current_index}_{int(time.time()*1000)}"
-        st.session_state.trigger_replay = False  # 讀取後重置
 
         html_code = f"""
-        <div style="width: 100%; text-align: center;">
+        <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
             <audio id="audio_{unique_id}" controls playsinline webkit-playsinline style="width: 100%;">
                 <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
             </audio>
+            
+            <div style="display: flex; gap: 8px; margin-top: 10px; width: 100%;">
+                <button onclick="navPrev()" style="flex: 1; padding: 12px 6px; background-color: #f0f2f6; color: #31333F; border: 1px solid #d6d8db; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; active: background-color: #e2e4e8;">
+                    ⬅️ 上一個
+                </button>
+                
+                <button onclick="playLocalAudio()" style="flex: 2; padding: 12px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    🔊 重複發音 (Replay)
+                </button>
+                
+                <button onclick="navNext()" style="flex: 1; padding: 12px 6px; background-color: #f0f2f6; color: #31333F; border: 1px solid #d6d8db; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; active: background-color: #e2e4e8;">
+                    ➡️ 下一個
+                </button>
+            </div>
         </div>
 
         <script>
@@ -451,49 +471,32 @@ if st.session_state.flattened_items:
                 if (audio) {{
                     audio.currentTime = 0;
                     audio.play().catch(function(err) {{
-                        console.log("iOS Play prevented or waiting for interaction:", err);
+                        console.log("iOS Play Error:", err);
                     }});
                 }}
             }}
 
-            // DOM 渲染完成後延遲自動播放
+            function navPrev() {{
+                window.parent.postMessage({{type: 'streamlit:setQueryParams', queryParams: {{nav: 'prev'}}}}, '*');
+            }}
+
+            function navNext() {{
+                window.parent.postMessage({{type: 'streamlit:setQueryParams', queryParams: {{nav: 'next'}}}}, '*');
+            }}
+
+            // 自動嘗試播放
             setTimeout(function() {{
                 playLocalAudio();
-            }}, 250);
+            }}, 300);
         </script>
         """
-        components.html(html_code, height=60)
-
-        # 📱 手機優化三欄控制按鈕：[⬅️ 上一個] [🔊 重複發音] [➡️ 下一個]
-        c_prev, c_replay, c_next = st.columns([1, 2, 1])
-
-        with c_prev:
-            if st.button("⬅️ 上一個", use_container_width=True):
-                if st.session_state.current_index > 0:
-                    st.session_state.current_index -= 1
-                    st.session_state.play_full_sentence = False
-                    st.session_state.trigger_replay = False
-                    st.rerun()
-
-        with c_replay:
-            if st.button("🔊 重複發音 (Replay)", type="primary", use_container_width=True):
-                st.session_state.play_full_sentence = False
-                st.session_state.trigger_replay = True
-                st.rerun()
-
-        with c_next:
-            if st.button("➡️ 下一個", use_container_width=True):
-                if st.session_state.current_index < total_count - 1:
-                    st.session_state.current_index += 1
-                    st.session_state.play_full_sentence = False
-                    st.session_state.trigger_replay = False
-                    st.rerun()
+        components.html(html_code, height=130)
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
 
     if not is_student_mode:
-        with st.expander("👁️ 檢視完整默書清單"):
+        with st.expander("👁️️ 檢視完整默書清單"):
             grid_cols = st.columns(3)
             for idx, item in enumerate(st.session_state.unique_items):
                 is_current = (idx == current_item["parent_idx"])
@@ -505,7 +508,6 @@ if st.session_state.flattened_items:
                 if col_target.button(btn_label, key=f"unique_btn_{idx}"):
                     st.session_state.current_index = item["start_flat_idx"]
                     st.session_state.play_full_sentence = False
-                    st.session_state.trigger_replay = False
                     st.rerun()
 else:
     st.info("👈 請在左側邊欄上傳 Word (.docx) 檔案。")
