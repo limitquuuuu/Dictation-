@@ -16,8 +16,8 @@ st.set_page_config(page_title="多語言默書小幫手", layout="wide")
 st.markdown("""
 <style>
     div.stButton > button {
-        padding: 4px 10px !important;
-        font-size: 14px !important;
+        padding: 6px 12px !important;
+        font-size: 15px !important;
         min-height: 0px !important;
         border-radius: 6px !important;
         margin: 2px 0px !important;
@@ -343,34 +343,8 @@ if st.session_state.flattened_items:
     item_no = current_item["item_no"]
     chunk_idx = current_item["chunk_idx"]
 
-    # 🎯 導覽控制欄：上一個 / 重複 / 下一個
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-    with col1:
-        if st.button("⬅️ 上一個", use_container_width=True):
-            if st.session_state.current_index > 0:
-                st.session_state.current_index -= 1
-                st.session_state.play_full_sentence = False
-                st.session_state.trigger_replay = False
-                st.rerun()
-
-    with col2:
-        if st.button("🔁 重複當前短句", use_container_width=True):
-            st.session_state.play_full_sentence = False
-            st.session_state.trigger_replay = True
-            st.rerun()
-
-    with col3:
-        if st.button("➡️ 下一個", use_container_width=True):
-            if st.session_state.current_index < total_count - 1:
-                st.session_state.current_index += 1
-                st.session_state.play_full_sentence = False
-                st.session_state.trigger_replay = False
-                st.rerun()
-
-    with col4:
-        st.write(f"**進度：{st.session_state.current_index + 1} / {total_count}**")
-
-    st.markdown("---")
+    # 頂部進度提示欄
+    st.caption(f"📊 當前進度：**{st.session_state.current_index + 1} / {total_count}**")
 
     # 🎯 中英文類型名稱與數字轉換字典
     eng_type_map = {
@@ -434,7 +408,7 @@ if st.session_state.flattened_items:
                 col_target = cols[idx % len(cols)]
                 
                 is_selected = (flat_i == st.session_state.current_index and not st.session_state.play_full_sentence)
-                btn_label = f"🔊 {s_item['spoken']}" if is_selected else f"▶️️ {s_item['spoken']}"
+                btn_label = f"🔊 {s_item['spoken']}" if is_selected else f"▶ {s_item['spoken']}"
                 if col_target.button(btn_label, key=f"chunk_btn_{flat_i}"):
                     st.session_state.current_index = flat_i
                     st.session_state.play_full_sentence = False
@@ -444,7 +418,7 @@ if st.session_state.flattened_items:
     # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-    # 🎯 針對 iOS Safari 深度優化的音訊元件 (Base64 + 動態 Key + 原生 Replay 按鈕)
+    # 🎯 針對 iOS Safari 深度優化的音訊元件 (Base64 + 底部整合控制區)
     try:
         temp_dir = tempfile.gettempdir()
         audio_path = os.path.join(temp_dir, "dictation_current.mp3")
@@ -469,10 +443,6 @@ if st.session_state.flattened_items:
             <audio id="audio_{unique_id}" controls playsinline webkit-playsinline style="width: 100%;">
                 <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
             </audio>
-            
-            <button onclick="playLocalAudio()" style="margin-top: 8px; width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer;">
-                🔊 重複發音 (Replay)
-            </button>
         </div>
 
         <script>
@@ -492,8 +462,32 @@ if st.session_state.flattened_items:
             }}, 250);
         </script>
         """
-        # 注意：components.html 不可傳入 key 參數，避免引發 Invalid Argument Error
-        components.html(html_code, height=115)
+        components.html(html_code, height=60)
+
+        # 📱 手機優化三欄控制按鈕：[⬅️ 上一個] [🔊 重複發音] [➡️ 下一個]
+        c_prev, c_replay, c_next = st.columns([1, 2, 1])
+
+        with c_prev:
+            if st.button("⬅️ 上一個", use_container_width=True):
+                if st.session_state.current_index > 0:
+                    st.session_state.current_index -= 1
+                    st.session_state.play_full_sentence = False
+                    st.session_state.trigger_replay = False
+                    st.rerun()
+
+        with c_replay:
+            if st.button("🔊 重複發音 (Replay)", type="primary", use_container_width=True):
+                st.session_state.play_full_sentence = False
+                st.session_state.trigger_replay = True
+                st.rerun()
+
+        with c_next:
+            if st.button("➡️ 下一個", use_container_width=True):
+                if st.session_state.current_index < total_count - 1:
+                    st.session_state.current_index += 1
+                    st.session_state.play_full_sentence = False
+                    st.session_state.trigger_replay = False
+                    st.rerun()
 
     except Exception as e:
         st.error(f"語音生成失敗：{e}")
