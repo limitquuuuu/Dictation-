@@ -4,7 +4,7 @@ import re
 import jieba
 import time
 import urllib.parse
-import base64
+import streamlit.components.v1 as components
 
 # 頁面配置
 st.set_page_config(page_title="多語言默書小幫手", layout="wide")
@@ -392,7 +392,7 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 使用 HTML5 呼叫 Google Translate 免費語音串流（完美支援 iPhone 及電腦普通話，且絕不卡 429 伺服器限制）
+    # 🎯 採用 Google Translate 免費語音串流，支援 iPhone/電腦普通話且無 429 限制
     encoded_text = urllib.parse.quote(full_speech_text)
     tts_lang = 'en' if is_eng else 'zh-CN'
     audio_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl={tts_lang}&client=tw-ob"
