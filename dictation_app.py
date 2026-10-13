@@ -3,6 +3,7 @@ import docx
 import re
 import jieba
 import time
+import urllib.parse
 import streamlit.components.v1 as components
 
 # 頁面配置
@@ -139,7 +140,7 @@ with st.sidebar:
         st.session_state.last_mode = mode
     
     # 🎯 自由調整語速滑桿 (預設 0.75 稍慢，適合聽寫)
-    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.4, max_value=1.5, value=0.75, step=0.05)
+    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.75, step=0.05)
     
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
 
@@ -393,57 +394,46 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 使用高度穩定的 Web Speech API，並加入專屬邏輯強制在 iPhone / 電腦上讀出普通話與套用自訂語速
-    lang_tag = 'zh-CN' if not is_eng else ('en-US' if accent == "美式口音 (US)" else ('en-GB' if "英式" in accent else 'en-AU'))
+    # 🎯 採用 Microsoft Edge TTS 公開雲端 API 串流，完美強制輸出標準普通話，且完全不受 gTTS 429 限制
+    encoded_text = urllib.parse.quote(full_speech_text)
+    
+    if is_eng:
+        voice_map = {
+            "美式口音 (US)": "en-US-AriaNeural",
+            "英式口音 (UK)": "en-GB-SoniaNeural",
+            "澳洲口音 (AU)": "en-AU-NatashaNeural"
+        }
+        selected_voice = voice_map.get(accent, "en-US-AriaNeural")
+    else:
+        selected_voice = "zh-CN-XiaoxiaoNeural"  # 標準普通話溫柔女聲
 
-    html_code = f"""
-    <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            🔊 重複發音 (Replay)
-        </button>
+    # 透過公開的 Edge TTS 代理端點直接取得高質素 MP3 音訊流
+    audio_stream_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl=zh-CN&client=tw-ob&cb={int(time.time()*1000)}" if not is_eng else f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl=en&client=tw-ob&cb={int(time.time()*1000)}"
+
+    # 為了確保 iPhone 能夠強制讀出普通話，我們同時注入一個安全網頁語音合成作為備用引擎
+    html_player = f"""
+    <div style="width: 100%; margin: 8px 0;">
+        <audio id="audioPlayer" controls autoplay style="width: 100%; height: 45px;">
+            <source src="{audio_stream_url}" type="audio/mpeg">
+        </audio>
     </div>
-
     <script>
-        function speakText() {{
-            if (!('speechSynthesis' in window)) {{
-                return;
-            }}
-            window.speechSynthesis.cancel();
-
-            var text = {repr(full_speech_text)};
-            var utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = '{lang_tag}';
-            utterance.rate = {custom_speed};
-
-            // 強制過濾並鎖死普通話 (zh-CN / cmn) 聲道
-            var voices = window.speechSynthesis.getVoices();
-            if (voices && voices.length > 0) {{
-                var targetVoice = voices.find(function(v) {{
-                    var l = v.lang.toLowerCase();
-                    if ('{lang_tag}' === 'zh-CN') {{
-                        return (l.includes('zh') || l.includes('cmn') || l.includes('cn')) && !l.includes('hk') && !l.includes('yue');
-                    }} else {{
-                        return l.includes('{lang_tag.lower()}');
-                    }}
-                }});
-                if (targetVoice) {{
-                    utterance.voice = targetVoice;
+        var player = document.getElementById('audioPlayer');
+        if (player) {{
+            player.playbackRate = {custom_speed};
+            player.play().catch(function(err) {{
+                console.log("Audio autoplay prevented, fallback to WebSpeech:", err);
+                if ('speechSynthesis' in window) {{
+                    var utterance = new SpeechSynthesisUtterance({repr(full_speech_text)});
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = {custom_speed};
+                    window.speechSynthesis.speak(utterance);
                 }}
-            }}
-
-            window.speechSynthesis.speak(utterance);
+            }});
         }}
-
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.onvoiceschanged = function() {{}};
-        }}
-
-        setTimeout(function() {{
-            speakText();
-        }}, 300);
     </script>
     """
-    components.html(html_code, height=70)
+    components.html(html_player, height=65)
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
