@@ -27,7 +27,7 @@ st.markdown("""
 st.title("📚 多語言默書小幫手 (中文 / English)")
 
 # --------------------------------------------------
-# 1. 數字轉中文口語 / 英文序數文字
+# 1. 數字轉中文口語 / 英文序數文字（加入停頓符號，讓讀音拉長/字間有停頓）
 # --------------------------------------------------
 def num_to_chinese(n):
     units = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
@@ -55,7 +55,7 @@ def num_to_english_ordinal(n):
     return ordinals.get(n, f"Number {n}")
 
 # --------------------------------------------------
-# 2. 標點符號轉讀音文字函數
+# 2. 標點符號與數詞停頓轉讀音函數
 # --------------------------------------------------
 def pronounce_punctuation(text, is_english=False):
     if is_english:
@@ -105,7 +105,7 @@ def add_natural_pauses(text, is_english=False):
         return re.sub(r'([。！？；：])', r'\1，', text)
 
 # --------------------------------------------------
-# 微軟 Edge TTS 非同步生成函數（帶快取，零 429 錯誤）
+# 微軟 Edge TTS 非同步生成函數（帶快取）
 # --------------------------------------------------
 async def _generate_edge_tts_bytes(text, voice, rate_str):
     communicate = edge_tts.Communicate(text, voice, rate=rate_str)
@@ -137,6 +137,8 @@ if "last_mode" not in st.session_state:
     st.session_state.last_mode = None
 if "play_full_sentence" not in st.session_state:
     st.session_state.play_full_sentence = False
+if "repeat_trigger" not in st.session_state:
+    st.session_state.repeat_trigger = 0
 
 # --------------------------------------------------
 # 側邊欄：設定與檔案上傳
@@ -163,7 +165,7 @@ with st.sidebar:
         st.session_state.current_index = 0
         st.session_state.last_mode = mode
     
-    # 🎯 自由調校語速滑桿（百分比控制）
+    # 🎯 自由調校語速滑桿
     custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.8, step=0.05)
     
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
@@ -363,14 +365,18 @@ if st.session_state.flattened_items:
         eng_ordinal = num_to_english_ordinal(item_no)
         if chunk_idx == 1 or st.session_state.play_full_sentence:
             if eng_item_type == "word":
-                prefix_speech = f"Word {item_no}, "
+                prefix_speech = f"Word, {item_no} ... "
             else:
-                prefix_speech = f"{eng_ordinal} {eng_item_type}, "
+                prefix_speech = f"{eng_ordinal}, {eng_item_type} ... "
         else:
             prefix_speech = ""
     else:
         chinese_num = num_to_chinese(item_no)
-        prefix_speech = f"第 {chinese_num} {item_type}，" if chunk_idx == 1 or st.session_state.play_full_sentence else ""
+        # 🎯 透過加入逗號與省略號（...），讓微軟語音在講「第」、「一」、「詞」時產生自然的長停頓
+        if chunk_idx == 1 or st.session_state.play_full_sentence:
+            prefix_speech = f"第 ... {chinese_num} ... {item_type} ... "
+        else:
+            prefix_speech = ""
 
     target_text = full_text if st.session_state.play_full_sentence else spoken_chunk
 
@@ -418,7 +424,14 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 微軟 Edge TTS 設定（完全支援 iPhone 普通話發音）
+    # 🎯 重複發音按鈕控制列
+    ctrl_col1, ctrl_col2 = st.columns([1, 4])
+    with ctrl_col1:
+        if st.button("🔄 重複發音", type="secondary", use_container_width=True):
+            st.session_state.repeat_trigger += 1
+            st.rerun()
+
+    # 🎯 微軟 Edge TTS 語音生成與播放
     if is_eng:
         voice_map = {
             "美式口音 (US)": "en-US-AriaNeural",
@@ -427,26 +440,26 @@ if st.session_state.flattened_items:
         }
         selected_voice = voice_map.get(accent, "en-US-AriaNeural")
     else:
-        selected_voice = "zh-CN-XiaoxiaoNeural"  # 微軟神級普通話女聲
+        selected_voice = "zh-CN-XiaoxiaoNeural"
 
-    # 計算語速百分比微調字符串，例如 -20% 或 +10%
     speed_percent = int((custom_speed - 1.0) * 100)
     rate_str = f"{speed_percent:+d}%"
 
     b64_audio = get_edge_tts_b64(full_speech_text, selected_voice, rate_str)
 
     if b64_audio:
+        # 加上 repeat_trigger 參數確保點擊重複發音按鈕時瀏覽器會重新整理並觸發自動播放
         html_player = f"""
         <div style="width: 100%; margin: 8px 0;">
-            <audio id="audioPlayer" controls autoplay style="width: 100%; height: 45px;">
+            <audio id="audioPlayer_{st.session_state.repeat_trigger}" controls autoplay style="width: 100%; height: 45px;">
                 <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
             </audio>
         </div>
         <script>
-            var player = document.getElementById('audioPlayer');
+            var player = document.getElementById('audioPlayer_{st.session_state.repeat_trigger}');
             if (player) {{
                 player.play().catch(function(err) {{
-                    console.log("Autoplay blocked by iOS browser:", err);
+                    console.log("Autoplay blocked:", err);
                 }});
             }}
         </script>
