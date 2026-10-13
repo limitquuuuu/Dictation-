@@ -405,9 +405,9 @@ if st.session_state.flattened_items:
     st.session_state.play_full_sentence = False
 
     # 🎯 瀏覽器內建語音引擎 (Web Speech API) - 完美解決 429 錯誤且支援所有平台
-    lang_tag = 'en-US' if is_eng else 'zh-HK'
-    if "英式" in accent:
-        lang_tag = 'en-GB'
+    lang_tag = 'en-GB' if is_eng else 'zh-CN'
+    if "美式" in accent:
+        lang_tag = 'en-US'
     elif "澳洲" in accent:
         lang_tag = 'en-AU'
 
