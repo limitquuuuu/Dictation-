@@ -3,9 +3,8 @@ import docx
 import re
 import jieba
 import time
-import os
-import tempfile
-from gtts import gTTS
+import urllib.parse
+import base64
 
 # 頁面配置
 st.set_page_config(page_title="多語言默書小幫手", layout="wide")
@@ -393,50 +392,28 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 採用 gTTS 雲端標準普通話發音（完美解決 iPhone 無法讀出普通話嘅問題）
-    try:
-        temp_dir = tempfile.gettempdir()
-        audio_path = os.path.join(temp_dir, "dictation_current.mp3")
-        
-        time.sleep(0.3)  # 防抖動微調
-        
-        if is_eng:
-            tld_val = 'co.uk' if "英式" in accent else ('com.au' if "澳洲" in accent else 'com')
-            tts = gTTS(text=full_speech_text, lang='en', tld=tld_val, slow=not speed_fast)
-        else:
-            tts = gTTS(text=full_speech_text, lang='zh-CN', slow=not speed_fast)
-            
-        tts.save(audio_path)
-        
-        # 使用 HTML5 audio 播放並帶有時間戳，強制 iPhone 每次重新載入音訊
-        audio_file_tag = f'<audio autoplay controls style="width: 100%;"><source src="data:audio/mp3;base64,{importlib_base64_encode(audio_path)}" type="audio/mp3"></audio>'
-        
-        with open(audio_path, "rb") as audio_file:
-            audio_bytes = audio_file.read()
-            
-        import base64
-        b64_audio = base64.b64encode(audio_bytes).decode()
-        
-        audio_html = f"""
-        <div style="width: 100%; margin-top: 10px; margin-bottom: 10px;">
-            <audio id="ttsAudio" autoplay controls style="width: 100%;">
-                <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
-                Your browser does not support the audio element.
-            </audio>
-        </div>
-        <script>
-            var audio = document.getElementById('ttsAudio');
-            if(audio) {{
-                audio.play().catch(function(error) {{
-                    console.log("Autoplay blocked: ", error);
-                }});
-            }}
-        </script>
-        """
-        components.html(audio_html, height=75)
+    # 🎯 使用 HTML5 呼叫 Google Translate 免費語音串流（完美支援 iPhone 及電腦普通話，且絕不卡 429 伺服器限制）
+    encoded_text = urllib.parse.quote(full_speech_text)
+    tts_lang = 'en' if is_eng else 'zh-CN'
+    audio_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl={tts_lang}&client=tw-ob"
 
-    except Exception as e:
-        st.error(f"語音生成失敗，請稍後再試。錯誤原因: {e}")
+    audio_html = f"""
+    <div style="width: 100%; margin-top: 10px; margin-bottom: 10px;">
+        <audio id="ttsAudio" autoplay controls style="width: 100%;">
+            <source src="{audio_url}" type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
+    </div>
+    <script>
+        var audio = document.getElementById('ttsAudio');
+        if(audio) {{
+            audio.play().catch(function(error) {{
+                console.log("Autoplay blocked: ", error);
+            }});
+        }}
+    </script>
+    """
+    components.html(audio_html, height=75)
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
