@@ -1,12 +1,8 @@
 import streamlit as st
 import docx
-from gtts import gTTS
 import re
 import jieba
 import time
-import os
-import tempfile
-import base64
 import streamlit.components.v1 as components
 
 # 頁面配置
@@ -135,15 +131,9 @@ with st.sidebar:
     lang = st.selectbox("選擇默書語言 (Language)：", ["中文 (Chinese)", "英文 (English)"])
     lang_code = 'zh-cn' if "中文" in lang else 'en'
     
-    tld_code = 'com'
+    accent = "美式口音 (US)"
     if "英文" in lang:
         accent = st.selectbox("選擇英文口音 (Accent)：", ["美式口音 (US)", "英式口音 (UK)", "澳洲口音 (AU)"])
-        if "英式" in accent:
-            tld_code = 'co.uk'
-        elif "澳洲" in accent:
-            tld_code = 'com.au'
-        else:
-            tld_code = 'com'
     
     mode = st.radio("選擇默書內容：", ["全部", "詞語", "句子", "段落"])
     
@@ -331,19 +321,6 @@ if uploaded_file is not None:
 if st.session_state.flattened_items:
     total_count = len(st.session_state.flattened_items)
 
-    # 🎯 相容 iOS Safari 的 URL Query 參數讀取
-    nav_action = st.query_params.get("nav", None)
-    if nav_action == "prev" and st.session_state.current_index > 0:
-        st.session_state.current_index -= 1
-        st.session_state.play_full_sentence = False
-        st.query_params.clear()
-        st.rerun()
-    elif nav_action == "next" and st.session_state.current_index < total_count - 1:
-        st.session_state.current_index += 1
-        st.session_state.play_full_sentence = False
-        st.query_params.clear()
-        st.rerun()
-
     if st.session_state.current_index >= total_count:
         st.session_state.current_index = 0
         
@@ -365,6 +342,7 @@ if st.session_state.flattened_items:
     }
 
     # 🎯 構建提示發音前綴
+    is_eng = (lang_code == 'en')
     if is_eng:
         eng_item_type = eng_type_map.get(item_type, item_type).lower()
         eng_ordinal = num_to_english_ordinal(item_no)
@@ -426,72 +404,57 @@ if st.session_state.flattened_items:
     # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-    # 🎯 原生 Streamlit 切換控制 + iOS 相容版音訊組件
-    try:
-        temp_dir = tempfile.gettempdir()
-        audio_path = os.path.join(temp_dir, "dictation_current.mp3")
-        
-        if lang_code == 'en':
-            tts = gTTS(text=full_speech_text, lang=lang_code, tld=tld_code, slow=not speed_fast)
-        else:
-            tts = gTTS(text=full_speech_text, lang=lang_code, slow=not speed_fast)
-            
-        tts.save(audio_path)
-        
-        with open(audio_path, "rb") as f:
-            audio_bytes = f.read()
-            b64_audio = base64.b64encode(audio_bytes).decode()
+    # 🎯 瀏覽器內建語音引擎 (Web Speech API) - 完美解決 429 錯誤且支援所有平台
+    lang_tag = 'en-US' if is_eng else 'zh-HK'
+    if "英式" in accent:
+        lang_tag = 'en-GB'
+    elif "澳洲" in accent:
+        lang_tag = 'en-AU'
 
-        unique_id = f"{st.session_state.current_index}_{int(time.time()*1000)}"
+    speech_rate = 0.8 if not speed_fast else 1.0
 
-        # 1. 前端 HTML 控制（iOS 發音 100% 成功）
-        html_code = f"""
-        <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-            <audio id="audio_{unique_id}" controls playsinline webkit-playsinline style="width: 100%;">
-                <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
-            </audio>
-            
-            <div style="margin-top: 10px; width: 100%;">
-                <button onclick="playLocalAudio()" style="width: 100%; padding: 12px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    🔊 重複發音 (Replay)
-                </button>
-            </div>
-        </div>
+    html_code = f"""
+    <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            🔊 重複發音 (Replay)
+        </button>
+    </div>
 
-        <script>
-            function playLocalAudio() {{
-                var audio = document.getElementById('audio_{unique_id}');
-                if (audio) {{
-                    audio.currentTime = 0;
-                    audio.play().catch(function(err) {{
-                        console.log("iOS Play Error:", err);
-                    }});
-                }}
+    <script>
+        function speakText() {{
+            if ('speechSynthesis' in window) {{
+                window.speechSynthesis.cancel();
+                var text = {repr(full_speech_text)};
+                var utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = '{lang_tag}';
+                utterance.rate = {speech_rate};
+                window.speechSynthesis.speak(utterance);
+            }} else {{
+                console.log("Browser does not support speech synthesis.");
             }}
+        }}
 
-            setTimeout(function() {{
-                playLocalAudio();
-            }}, 300);
-        </script>
-        """
-        components.html(html_code, height=110)
+        // 自動播放
+        setTimeout(function() {{
+            speakText();
+        }}, 300);
+    </script>
+    """
+    components.html(html_code, height=70)
 
-        # 2. 原生 Streamlit 切換按鈕（100% 解決 iOS 無反應問題）
-        nav_col1, nav_col2 = st.columns(2)
-        with nav_col1:
-            if st.button("⬅️ 上一個", use_container_width=True, disabled=(st.session_state.current_index == 0)):
-                st.session_state.current_index -= 1
-                st.session_state.play_full_sentence = False
-                st.rerun()
+    # 原生 Streamlit 切換按鈕
+    nav_col1, nav_col2 = st.columns(2)
+    with nav_col1:
+        if st.button("⬅️ 上一個", use_container_width=True, disabled=(st.session_state.current_index == 0)):
+            st.session_state.current_index -= 1
+            st.session_state.play_full_sentence = False
+            st.rerun()
 
-        with nav_col2:
-            if st.button("➡️ 下一個", use_container_width=True, disabled=(st.session_state.current_index == total_count - 1)):
-                st.session_state.current_index += 1
-                st.session_state.play_full_sentence = False
-                st.rerun()
-
-    except Exception as e:
-        st.error(f"語音生成失敗：{e}")
+    with nav_col2:
+        if st.button("➡️ 下一個", use_container_width=True, disabled=(st.session_state.current_index == total_count - 1)):
+            st.session_state.current_index += 1
+            st.session_state.play_full_sentence = False
+            st.rerun()
 
     if not is_student_mode:
         with st.expander("👁 檢視完整默書清單"):
