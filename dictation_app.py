@@ -391,7 +391,6 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 設定為普通話標籤 (zh-CN)
     lang_tag = 'en-US' if is_eng else 'zh-CN'
     if is_eng:
         if "英式" in accent:
@@ -401,7 +400,7 @@ if st.session_state.flattened_items:
 
     speech_rate = 0.8 if not speed_fast else 1.0
 
-    # 🛠️ 強化版 Web Speech API 語音腳本 (解決 iOS / Chrome 相容性及無聲問題)
+    # 🛠️ 終極修復：強制過濾並鎖死普通話語音（解決 iOS 預設 fallback 問題）
     html_code = f"""
     <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
         <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -410,49 +409,50 @@ if st.session_state.flattened_items:
     </div>
 
     <script>
-        // 預先加載系統語音庫
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.getVoices();
-        }}
-
         function speakText() {{
             if (!('speechSynthesis' in window)) {{
-                alert("您的瀏覽器不支援語音功能");
                 return;
             }}
 
-            // 停止舊有語音
             window.speechSynthesis.cancel();
 
-            setTimeout(function() {{
-                var text = {repr(full_speech_text)};
-                var utterance = new SpeechSynthesisUtterance(text);
-                var targetLang = '{lang_tag}';
-                utterance.lang = targetLang;
-                utterance.rate = {speech_rate};
+            var text = {repr(full_speech_text)};
+            var utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = {speech_rate};
+            var targetLang = '{lang_tag}';
+            utterance.lang = targetLang;
 
-                // 自動匹配最好的普通話/中文語音套件
-                var voices = window.speechSynthesis.getVoices();
-                if (voices.length > 0) {{
-                    var matchedVoice = voices.find(function(v) {{
-                        return v.lang.replace('_', '-').toLowerCase() === targetLang.toLowerCase();
+            // iOS / 瀏覽器語音強制匹配邏輯
+            var voices = window.speechSynthesis.getVoices();
+            if (voices && voices.length > 0) {{
+                var selectedVoice = null;
+                if (targetLang === 'zh-CN') {{
+                    // 強制尋找普通話聲道 (排除廣東話)
+                    selectedVoice = voices.find(function(v) {{
+                        var l = v.lang.toLowerCase();
+                        return (l.includes('zh-cn') || l.includes('cmn') || l.includes('zh_cn')) && !l.includes('hk') && !l.includes('yue');
                     }}) || voices.find(function(v) {{
-                        return v.lang.toLowerCase().includes('zh') || v.lang.toLowerCase().includes('cn');
+                        var name = v.name.toLowerCase();
+                        return (name.includes('mandarin') || name.includes('tianjin') || name.includes('sin-ji') === false) && v.lang.toLowerCase().includes('zh');
                     }});
-
-                    if (matchedVoice) {{
-                        utterance.voice = matchedVoice;
-                    }}
                 }}
+                
+                if (selectedVoice) {{
+                    utterance.voice = selectedVoice;
+                }}
+            }}
 
-                window.speechSynthesis.speak(utterance);
-            }}, 50);
+            window.speechSynthesis.speak(utterance);
         }}
 
-        // 延遲自動播放，確保瀏覽器準備就緒
+        // 確保 iOS 語音清單載入完成後執行
+        if ('speechSynthesis' in window) {{
+            window.speechSynthesis.onvoiceschanged = function() {{}};
+        }}
+
         setTimeout(function() {{
             speakText();
-        }}, 500);
+        }}, 400);
     </script>
     """
     components.html(html_code, height=70)
