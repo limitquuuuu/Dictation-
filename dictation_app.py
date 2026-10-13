@@ -139,7 +139,9 @@ with st.sidebar:
         st.session_state.current_index = 0
         st.session_state.last_mode = mode
     
-    speed_fast = st.checkbox("正常語速 (取消勾選為慢速發音)", value=True)
+    # 🎯 自調語速滑桿 (預設 0.75 稍慢，方便聽寫)
+    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.75, step=0.05)
+    
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
 
 # --------------------------------------------------
@@ -392,59 +394,28 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 採用前端網頁瀏覽器內建語音 (Web Speech API)，透過智慧映射強制指定普通話 (zh-CN) 與英文口音，徹底根絕 429 錯誤！
-    lang_tag = 'zh-CN' if not is_eng else ('en-US' if accent == "美式口音 (US)" else ('en-GB' if "英式" in accent else 'en-AU'))
-    speech_rate = 0.8 if not speed_fast else 1.0
+    # 🎯 語音串流與動態語速控制
+    encoded_text = urllib.parse.quote(full_speech_text)
+    tts_lang = 'en' if is_eng else 'zh-CN'
+    audio_stream_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl={tts_lang}&client=tw-ob&cb={int(time.time()*1000)}"
 
-    html_code = f"""
-    <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            🔊 重複發音 (Replay)
-        </button>
+    html_player = f"""
+    <div style="width: 100%; margin: 8px 0;">
+        <audio id="audioPlayer" controls autoplay style="width: 100%; height: 45px;">
+            <source src="{audio_stream_url}" type="audio/mpeg">
+        </audio>
     </div>
-
     <script>
-        function speakText() {{
-            if (!('speechSynthesis' in window)) {{
-                return;
-            }}
-            window.speechSynthesis.cancel();
-
-            var text = {repr(full_speech_text)};
-            var utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = '{lang_tag}';
-            utterance.rate = {speech_rate};
-
-            // 強制尋找普通話聲道（特別適配 iOS 及桌面瀏覽器）
-            var voices = window.speechSynthesis.getVoices();
-            if (voices && voices.length > 0) {{
-                var targetVoice = voices.find(function(v) {{
-                    var l = v.lang.toLowerCase();
-                    if ('{lang_tag}' === 'zh-CN') {{
-                        return (l.includes('zh') || l.includes('cmn')) && !l.includes('hk') && !l.includes('yue') && !l.includes('tw');
-                    }} else {{
-                        return l.includes('{lang_tag.lower()}');
-                    }}
-                }});
-                if (targetVoice) {{
-                    utterance.voice = targetVoice;
-                }}
-            }}
-
-            window.speechSynthesis.speak(utterance);
+        var player = document.getElementById('audioPlayer');
+        if (player) {{
+            player.playbackRate = {custom_speed};
+            player.play().catch(function(err) {{
+                console.log("Autoplay failed:", err);
+            }});
         }}
-
-        // 確保語音庫載入後觸發自動播放
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.onvoiceschanged = function() {{}};
-        }}
-
-        setTimeout(function() {{
-            speakText();
-        }}, 400);
     </script>
     """
-    components.html(html_code, height=70)
+    components.html(html_player, height=65)
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
