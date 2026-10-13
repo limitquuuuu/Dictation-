@@ -3,9 +3,7 @@ import docx
 import re
 import jieba
 import time
-import os
-import tempfile
-from gtts import gTTS
+import streamlit.components.v1 as components
 
 # 頁面配置
 st.set_page_config(page_title="多語言默書小幫手", layout="wide")
@@ -140,8 +138,8 @@ with st.sidebar:
         st.session_state.current_index = 0
         st.session_state.last_mode = mode
     
-    # 🎯 自由調校語速滑桿（結合 gTTS 的 slow 參數及語速選擇）
-    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.75, step=0.05)
+    # 🎯 自由調校語速滑桿
+    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.4, max_value=1.5, value=0.75, step=0.05)
     
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
 
@@ -308,24 +306,6 @@ def parse_docx_content(doc, selected_mode, is_english=False):
 
     return unique_list, flattened_list
 
-# --------------------------------------------------
-# 帶快取機制的 gTTS 生成函數（絕對不會 429）
-# --------------------------------------------------
-@st.cache_data(show_spinner=False)
-def get_gtts_audio_bytes(text, lang_code, slow_mode, tld='com'):
-    tts = gTTS(text=text, lang=lang_code, tld=tld, slow=slow_mode)
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    temp_file.close()
-    tts.save(temp_file.name)
-    
-    with open(temp_file.name, "rb") as f:
-        audio_bytes = f.read()
-    try:
-        os.unlink(temp_file.name)
-    except:
-        pass
-    return audio_bytes
-
 if uploaded_file is not None:
     doc = docx.Document(uploaded_file)
     is_eng = (lang_code == 'en')
@@ -413,45 +393,69 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 生成並播放語音（結合快取與自訂語速）
-    try:
-        tld_val = 'co.uk' if ("英文" in lang and "英式" in accent) else ('com.au' if ("英文" in lang and "澳洲" in accent) else 'com')
-        audio_lang = 'en' if is_eng else 'zh-CN'
-        
-        # 如果滑桿小於 0.7，自動開啟 gTTS 慢速模式
-        is_slow = custom_speed < 0.7
-        
-        audio_bytes = get_gtts_audio_bytes(
-            text=full_speech_text, 
-            lang_code=audio_lang, 
-            slow_mode=is_slow, 
-            tld=tld_val
-        )
-        
-        # 透過 HTML5 audio 配合自訂語速（playbackRate）與自動播放，完美相容 iPhone 正常普通話發音
-        import base64
-        b64_str = base64.b64encode(audio_bytes).decode()
-        
-        audio_html = f"""
-        <div style="width: 100%; margin: 8px 0;">
-            <audio id="audioPlayer" controls autoplay style="width: 100%; height: 45px;">
-                <source src="data:audio/mp3;base64,{b64_str}" type="audio/mp3">
-            </audio>
-        </div>
-        <script>
-            var player = document.getElementById('audioPlayer');
-            if (player) {{
-                player.playbackRate = {custom_speed};
-                player.play().catch(function(err) {{
-                    console.log("Autoplay blocked by browser policy:", err);
-                }});
-            }}
-        </script>
-        """
-        components.html(audio_html, height=65)
+    # 🎯 採用前端網頁內建 Web Speech API，強制鎖死普通話與自訂語速，零 429 錯誤
+    lang_tag = 'zh-CN' if not is_eng else ('en-US' if accent == "美式口音 (US)" else ('en-GB' if "英式" in accent else 'en-AU'))
 
-    except Exception as e:
-        st.error(f"語音生成出錯: {e}")
+    html_code = f"""
+    <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            🔊 重複發音 (Replay)
+        </button>
+    </div>
+
+    <script>
+        function speakText() {{
+            if (!('speechSynthesis' in window)) {{
+                alert("您的瀏覽器不支援語音功能");
+                return;
+            }}
+            window.speechSynthesis.cancel();
+
+            var text = {repr(full_speech_text)};
+            var utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = {custom_speed};
+
+            // 強制在 iPhone 及電腦上尋找標準普通話/國語聲道
+            var voices = window.speechSynthesis.getVoices();
+            if (voices && voices.length > 0) {{
+                var targetVoice = voices.find(function(v) {{
+                    var l = v.lang.toLowerCase();
+                    if ('{lang_tag}' === 'zh-CN') {{
+                        // 優先匹配普通話代碼，嚴格排除香港廣東話 (hk/yue)
+                        return (l.includes('zh-cn') || l.includes('cmn') || l.includes('zh_cn') || l.includes('mandarin')) && !l.includes('hk') && !l.includes('yue');
+                    }} else {{
+                        return l.includes('{lang_tag.lower()}');
+                    }}
+                }});
+                
+                // 如果找不到精確 zh-cn，找任何包含 zh 但不是 hk 的聲道
+                if (!targetVoice && '{lang_tag}' === 'zh-CN') {{
+                    targetVoice = voices.find(function(v) {{
+                        var l = v.lang.toLowerCase();
+                        return l.includes('zh') && !l.includes('hk') && !l.includes('yue');
+                    }});
+                }}
+
+                if (targetVoice) {{
+                    utterance.voice = targetVoice;
+                }}
+            }}
+            
+            utterance.lang = '{lang_tag}';
+            window.speechSynthesis.speak(utterance);
+        }}
+
+        if ('speechSynthesis' in window) {{
+            window.speechSynthesis.onvoiceschanged = function() {{}};
+        }}
+
+        // 自動播放
+        setTimeout(function() {{
+            speakText();
+        }}, 300);
+    </script>
+    """
+    components.html(html_code, height=70)
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
