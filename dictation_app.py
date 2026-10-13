@@ -3,9 +3,8 @@ import docx
 import re
 import jieba
 import time
-import os
-import tempfile
-from gtts import gTTS
+import urllib.parse
+import streamlit.components.v1 as components
 
 # 頁面配置
 st.set_page_config(page_title="多語言默書小幫手", layout="wide")
@@ -89,7 +88,7 @@ def pronounce_punctuation(text, is_english=False):
             (r'》', '，右书名号，'),
             (r'、', '，顿号，'),
             (r'……', '，省略号，'),
-            (r'—', '，破折號，')
+            (r'—', '，破折号，')
         ]
     
     spoken_text = text
@@ -306,26 +305,6 @@ def parse_docx_content(doc, selected_mode, is_english=False):
 
     return unique_list, flattened_list
 
-# --------------------------------------------------
-# 帶有記憶體快取（Cache）的 gTTS 語音生成函數 (徹底解決 429)
-# --------------------------------------------------
-@st.cache_data(show_spinner=False)
-def get_cached_tts_bytes(text, lang_code, slow_speed, tld='com'):
-    tts = gTTS(text=text, lang=lang_code, tld=tld, slow=slow_speed)
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    temp_file.close()
-    tts.save(temp_file.name)
-    
-    with open(temp_file.name, "rb") as f:
-        audio_bytes = f.read()
-    
-    try:
-        os.unlink(temp_file.name)
-    except:
-        pass
-        
-    return audio_bytes
-
 if uploaded_file is not None:
     doc = docx.Document(uploaded_file)
     is_eng = (lang_code == 'en')
@@ -413,23 +392,59 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 呼叫帶快取的 gTTS 播放器（同一個詞句只會在第一次聯網生成，之後直接從記憶體快取讀取，絕不會 429！）
-    try:
-        tld_val = 'co.uk' if ("英文" in lang and "英式" in accent) else ('com.au' if ("英文" in lang and "澳洲" in accent) else 'com')
-        audio_lang = 'en' if is_eng else 'zh-CN'
-        
-        audio_bytes = get_cached_tts_bytes(
-            text=full_speech_text, 
-            lang_code=audio_lang, 
-            slow_speed=not speed_fast, 
-            tld=tld_val
-        )
-        
-        # 使用 Streamlit 原生 audio 播放，支援自動播放並完美相容 iPhone 與電腦
-        st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+    # 🎯 採用前端網頁瀏覽器內建語音 (Web Speech API)，透過智慧映射強制指定普通話 (zh-CN) 與英文口音，徹底根絕 429 錯誤！
+    lang_tag = 'zh-CN' if not is_eng else ('en-US' if accent == "美式口音 (US)" else ('en-GB' if "英式" in accent else 'en-AU'))
+    speech_rate = 0.8 if not speed_fast else 1.0
 
-    except Exception as e:
-        st.error(f"語音生成出錯: {e}")
+    html_code = f"""
+    <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            🔊 重複發音 (Replay)
+        </button>
+    </div>
+
+    <script>
+        function speakText() {{
+            if (!('speechSynthesis' in window)) {{
+                return;
+            }}
+            window.speechSynthesis.cancel();
+
+            var text = {repr(full_speech_text)};
+            var utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = '{lang_tag}';
+            utterance.rate = {speech_rate};
+
+            // 強制尋找普通話聲道（特別適配 iOS 及桌面瀏覽器）
+            var voices = window.speechSynthesis.getVoices();
+            if (voices && voices.length > 0) {{
+                var targetVoice = voices.find(function(v) {{
+                    var l = v.lang.toLowerCase();
+                    if ('{lang_tag}' === 'zh-CN') {{
+                        return (l.includes('zh') || l.includes('cmn')) && !l.includes('hk') && !l.includes('yue') && !l.includes('tw');
+                    }} else {{
+                        return l.includes('{lang_tag.lower()}');
+                    }}
+                }});
+                if (targetVoice) {{
+                    utterance.voice = targetVoice;
+                }}
+            }}
+
+            window.speechSynthesis.speak(utterance);
+        }}
+
+        // 確保語音庫載入後觸發自動播放
+        if ('speechSynthesis' in window) {{
+            window.speechSynthesis.onvoiceschanged = function() {{}};
+        }}
+
+        setTimeout(function() {{
+            speakText();
+        }}, 400);
+    </script>
+    """
+    components.html(html_code, height=70)
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
