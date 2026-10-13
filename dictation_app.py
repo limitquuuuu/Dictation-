@@ -71,23 +71,23 @@ def pronounce_punctuation(text, is_english=False):
         ]
     else:
         replacements = [
-            (r'，', '，逗號，'),
-            (r'。', '，句號，'),
-            (r'？', '，問號，'),
-            (r'！', '，感歎號，'),
-            (r'；', '，分號，'),
-            (r'：', '，冒號，'),
-            (r'「', '，左單引號，'),
-            (r'」', '，右單引號，'),
-            (r'『', '，左雙引號，'),
-            (r'』', '，右雙引號，'),
-            (r'（', '，左括號，'),
-            (r'）', '，右括號，'),
-            (r'《', '，左書名號，'),
-            (r'》', '，右書名號，'),
-            (r'、', '，頓號，'),
-            (r'……', '，省略號，'),
-            (r'—', '，破折號，')
+            (r'，', '，逗号，'),
+            (r'。', '，句号，'),
+            (r'？', '，问号，'),
+            (r'！', '，感叹号，'),
+            (r'；', '，分号，'),
+            (r'：', '，冒号，'),
+            (r'「', '，左单引号，'),
+            (r'」', '，右单引号，'),
+            (r'『', '，左双引号，'),
+            (r'』', '，右双引号，'),
+            (r'（', '，左括号，'),
+            (r'）', '，右括号，'),
+            (r'《', '，左书名号，'),
+            (r'》', '，右书名号，'),
+            (r'、', '，顿号，'),
+            (r'……', '，省略号，'),
+            (r'—', '，破折号，')
         ]
     
     spoken_text = text
@@ -95,9 +95,6 @@ def pronounce_punctuation(text, is_english=False):
         spoken_text = re.sub(pattern, repr_str, spoken_text)
     return spoken_text
 
-# --------------------------------------------------
-# 3. 未開啟標點朗讀時，為原文標點增加天然停頓
-# --------------------------------------------------
 def add_natural_pauses(text, is_english=False):
     if is_english:
         return re.sub(r'([.,!?;:])', r'\1 ', text)
@@ -145,7 +142,7 @@ with st.sidebar:
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
 
 # --------------------------------------------------
-# 核心演算法：按語意/詞語完整性自然分組 (NLP Split)
+# 核心演算法：分組
 # --------------------------------------------------
 def split_into_chunks(text, is_english=False):
     clean_text = text.strip()
@@ -209,9 +206,6 @@ def split_into_chunks(text, is_english=False):
 
     return final_chunks
 
-# --------------------------------------------------
-# 解析 Word 文件 (.docx)
-# --------------------------------------------------
 def parse_docx_content(doc, selected_mode, is_english=False):
     words_text = ""
     sentences_text = []
@@ -310,9 +304,6 @@ def parse_docx_content(doc, selected_mode, is_english=False):
 
     return unique_list, flattened_list
 
-# --------------------------------------------------
-# 主程式運作邏輯
-# --------------------------------------------------
 if uploaded_file is not None:
     doc = docx.Document(uploaded_file)
     is_eng = (lang_code == 'en')
@@ -331,17 +322,14 @@ if st.session_state.flattened_items:
     item_no = current_item["item_no"]
     chunk_idx = current_item["chunk_idx"]
 
-    # 頂部進度提示欄
     st.caption(f"📊 當前進度：**{st.session_state.current_index + 1} / {total_count}**")
 
-    # 🎯 中英文類型名稱與數字轉換字典
     eng_type_map = {
         "詞語": "Word",
         "句子": "Sentence",
         "段落": "Paragraph"
     }
 
-    # 🎯 構建提示發音前綴
     is_eng = (lang_code == 'en')
     if is_eng:
         eng_item_type = eng_type_map.get(item_type, item_type).lower()
@@ -401,18 +389,19 @@ if st.session_state.flattened_items:
                     st.session_state.play_full_sentence = False
                     st.rerun()
 
-    # 重置全句播放標記
     st.session_state.play_full_sentence = False
 
-    # 🎯 瀏覽器內建語音引擎 (Web Speech API) - 完美解決 429 錯誤且支援所有平台
-    lang_tag = 'en-GB' if is_eng else 'zh-CN'
-    if "美式" in accent:
-        lang_tag = 'en-US'
-    elif "澳洲" in accent:
-        lang_tag = 'en-AU'
+    # 🎯 設定為普通話標籤 (zh-CN)
+    lang_tag = 'en-US' if is_eng else 'zh-CN'
+    if is_eng:
+        if "英式" in accent:
+            lang_tag = 'en-GB'
+        elif "澳洲" in accent:
+            lang_tag = 'en-AU'
 
     speech_rate = 0.8 if not speed_fast else 1.0
 
+    # 🛠️ 強化版 Web Speech API 語音腳本 (解決 iOS / Chrome 相容性及無聲問題)
     html_code = f"""
     <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
         <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -421,28 +410,53 @@ if st.session_state.flattened_items:
     </div>
 
     <script>
-        function speakText() {{
-            if ('speechSynthesis' in window) {{
-                window.speechSynthesis.cancel();
-                var text = {repr(full_speech_text)};
-                var utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = '{lang_tag}';
-                utterance.rate = {speech_rate};
-                window.speechSynthesis.speak(utterance);
-            }} else {{
-                console.log("Browser does not support speech synthesis.");
-            }}
+        // 預先加載系統語音庫
+        if ('speechSynthesis' in window) {{
+            window.speechSynthesis.getVoices();
         }}
 
-        // 自動播放
+        function speakText() {{
+            if (!('speechSynthesis' in window)) {{
+                alert("您的瀏覽器不支援語音功能");
+                return;
+            }}
+
+            // 停止舊有語音
+            window.speechSynthesis.cancel();
+
+            setTimeout(function() {{
+                var text = {repr(full_speech_text)};
+                var utterance = new SpeechSynthesisUtterance(text);
+                var targetLang = '{lang_tag}';
+                utterance.lang = targetLang;
+                utterance.rate = {speech_rate};
+
+                // 自動匹配最好的普通話/中文語音套件
+                var voices = window.speechSynthesis.getVoices();
+                if (voices.length > 0) {{
+                    var matchedVoice = voices.find(function(v) {{
+                        return v.lang.replace('_', '-').toLowerCase() === targetLang.toLowerCase();
+                    }}) || voices.find(function(v) {{
+                        return v.lang.toLowerCase().includes('zh') || v.lang.toLowerCase().includes('cn');
+                    }});
+
+                    if (matchedVoice) {{
+                        utterance.voice = matchedVoice;
+                    }}
+                }}
+
+                window.speechSynthesis.speak(utterance);
+            }}, 50);
+        }}
+
+        // 延遲自動播放，確保瀏覽器準備就緒
         setTimeout(function() {{
             speakText();
-        }}, 300);
+        }}, 500);
     </script>
     """
     components.html(html_code, height=70)
 
-    # 原生 Streamlit 切換按鈕
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
         if st.button("⬅️ 上一個", use_container_width=True, disabled=(st.session_state.current_index == 0)):
