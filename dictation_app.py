@@ -3,7 +3,9 @@ import docx
 import re
 import jieba
 import time
-import streamlit.components.v1 as components
+import os
+import tempfile
+from gtts import gTTS
 
 # 頁面配置
 st.set_page_config(page_title="多語言默書小幫手", layout="wide")
@@ -391,71 +393,50 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    lang_tag = 'en-US' if is_eng else 'zh-CN'
-    if is_eng:
-        if "英式" in accent:
-            lang_tag = 'en-GB'
-        elif "澳洲" in accent:
-            lang_tag = 'en-AU'
-
-    speech_rate = 0.8 if not speed_fast else 1.0
-
-    # 🛠️ 終極修復：強制過濾並鎖死普通話語音（解決 iOS 預設 fallback 問題）
-    html_code = f"""
-    <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            🔊 重複發音 (Replay)
-        </button>
-    </div>
-
-    <script>
-        function speakText() {{
-            if (!('speechSynthesis' in window)) {{
-                return;
+    # 🎯 採用 gTTS 雲端標準普通話發音（完美解決 iPhone 無法讀出普通話嘅問題）
+    try:
+        temp_dir = tempfile.gettempdir()
+        audio_path = os.path.join(temp_dir, "dictation_current.mp3")
+        
+        time.sleep(0.3)  # 防抖動微調
+        
+        if is_eng:
+            tld_val = 'co.uk' if "英式" in accent else ('com.au' if "澳洲" in accent else 'com')
+            tts = gTTS(text=full_speech_text, lang='en', tld=tld_val, slow=not speed_fast)
+        else:
+            tts = gTTS(text=full_speech_text, lang='zh-CN', slow=not speed_fast)
+            
+        tts.save(audio_path)
+        
+        # 使用 HTML5 audio 播放並帶有時間戳，強制 iPhone 每次重新載入音訊
+        audio_file_tag = f'<audio autoplay controls style="width: 100%;"><source src="data:audio/mp3;base64,{importlib_base64_encode(audio_path)}" type="audio/mp3"></audio>'
+        
+        with open(audio_path, "rb") as audio_file:
+            audio_bytes = audio_file.read()
+            
+        import base64
+        b64_audio = base64.b64encode(audio_bytes).decode()
+        
+        audio_html = f"""
+        <div style="width: 100%; margin-top: 10px; margin-bottom: 10px;">
+            <audio id="ttsAudio" autoplay controls style="width: 100%;">
+                <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+                Your browser does not support the audio element.
+            </audio>
+        </div>
+        <script>
+            var audio = document.getElementById('ttsAudio');
+            if(audio) {{
+                audio.play().catch(function(error) {{
+                    console.log("Autoplay blocked: ", error);
+                }});
             }}
+        </script>
+        """
+        components.html(audio_html, height=75)
 
-            window.speechSynthesis.cancel();
-
-            var text = {repr(full_speech_text)};
-            var utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = {speech_rate};
-            var targetLang = '{lang_tag}';
-            utterance.lang = targetLang;
-
-            // iOS / 瀏覽器語音強制匹配邏輯
-            var voices = window.speechSynthesis.getVoices();
-            if (voices && voices.length > 0) {{
-                var selectedVoice = null;
-                if (targetLang === 'zh-CN') {{
-                    // 強制尋找普通話聲道 (排除廣東話)
-                    selectedVoice = voices.find(function(v) {{
-                        var l = v.lang.toLowerCase();
-                        return (l.includes('zh-cn') || l.includes('cmn') || l.includes('zh_cn')) && !l.includes('hk') && !l.includes('yue');
-                    }}) || voices.find(function(v) {{
-                        var name = v.name.toLowerCase();
-                        return (name.includes('mandarin') || name.includes('tianjin') || name.includes('sin-ji') === false) && v.lang.toLowerCase().includes('zh');
-                    }});
-                }}
-                
-                if (selectedVoice) {{
-                    utterance.voice = selectedVoice;
-                }}
-            }}
-
-            window.speechSynthesis.speak(utterance);
-        }}
-
-        // 確保 iOS 語音清單載入完成後執行
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.onvoiceschanged = function() {{}};
-        }}
-
-        setTimeout(function() {{
-            speakText();
-        }}, 400);
-    </script>
-    """
-    components.html(html_code, height=70)
+    except Exception as e:
+        st.error(f"語音生成失敗，請稍後再試。錯誤原因: {e}")
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
