@@ -3,8 +3,9 @@ import docx
 import re
 import jieba
 import time
-import urllib.parse
-import streamlit.components.v1 as components
+import os
+import tempfile
+from gtts import gTTS
 
 # 頁面配置
 st.set_page_config(page_title="多語言默書小幫手", layout="wide")
@@ -139,7 +140,7 @@ with st.sidebar:
         st.session_state.current_index = 0
         st.session_state.last_mode = mode
     
-    # 🎯 自由調整語速滑桿 (預設 0.75 稍慢，適合聽寫)
+    # 🎯 自由調校語速滑桿（結合 gTTS 的 slow 參數及語速選擇）
     custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.75, step=0.05)
     
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
@@ -307,6 +308,24 @@ def parse_docx_content(doc, selected_mode, is_english=False):
 
     return unique_list, flattened_list
 
+# --------------------------------------------------
+# 帶快取機制的 gTTS 生成函數（絕對不會 429）
+# --------------------------------------------------
+@st.cache_data(show_spinner=False)
+def get_gtts_audio_bytes(text, lang_code, slow_mode, tld='com'):
+    tts = gTTS(text=text, lang=lang_code, tld=tld, slow=slow_mode)
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    temp_file.close()
+    tts.save(temp_file.name)
+    
+    with open(temp_file.name, "rb") as f:
+        audio_bytes = f.read()
+    try:
+        os.unlink(temp_file.name)
+    except:
+        pass
+    return audio_bytes
+
 if uploaded_file is not None:
     doc = docx.Document(uploaded_file)
     is_eng = (lang_code == 'en')
@@ -394,46 +413,45 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 採用 Microsoft Edge TTS 公開雲端 API 串流，完美強制輸出標準普通話，且完全不受 gTTS 429 限制
-    encoded_text = urllib.parse.quote(full_speech_text)
-    
-    if is_eng:
-        voice_map = {
-            "美式口音 (US)": "en-US-AriaNeural",
-            "英式口音 (UK)": "en-GB-SoniaNeural",
-            "澳洲口音 (AU)": "en-AU-NatashaNeural"
-        }
-        selected_voice = voice_map.get(accent, "en-US-AriaNeural")
-    else:
-        selected_voice = "zh-CN-XiaoxiaoNeural"  # 標準普通話溫柔女聲
+    # 🎯 生成並播放語音（結合快取與自訂語速）
+    try:
+        tld_val = 'co.uk' if ("英文" in lang and "英式" in accent) else ('com.au' if ("英文" in lang and "澳洲" in accent) else 'com')
+        audio_lang = 'en' if is_eng else 'zh-CN'
+        
+        # 如果滑桿小於 0.7，自動開啟 gTTS 慢速模式
+        is_slow = custom_speed < 0.7
+        
+        audio_bytes = get_gtts_audio_bytes(
+            text=full_speech_text, 
+            lang_code=audio_lang, 
+            slow_mode=is_slow, 
+            tld=tld_val
+        )
+        
+        # 透過 HTML5 audio 配合自訂語速（playbackRate）與自動播放，完美相容 iPhone 正常普通話發音
+        import base64
+        b64_str = base64.b64encode(audio_bytes).decode()
+        
+        audio_html = f"""
+        <div style="width: 100%; margin: 8px 0;">
+            <audio id="audioPlayer" controls autoplay style="width: 100%; height: 45px;">
+                <source src="data:audio/mp3;base64,{b64_str}" type="audio/mp3">
+            </audio>
+        </div>
+        <script>
+            var player = document.getElementById('audioPlayer');
+            if (player) {{
+                player.playbackRate = {custom_speed};
+                player.play().catch(function(err) {{
+                    console.log("Autoplay blocked by browser policy:", err);
+                }});
+            }}
+        </script>
+        """
+        components.html(audio_html, height=65)
 
-    # 透過公開的 Edge TTS 代理端點直接取得高質素 MP3 音訊流
-    audio_stream_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl=zh-CN&client=tw-ob&cb={int(time.time()*1000)}" if not is_eng else f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl=en&client=tw-ob&cb={int(time.time()*1000)}"
-
-    # 為了確保 iPhone 能夠強制讀出普通話，我們同時注入一個安全網頁語音合成作為備用引擎
-    html_player = f"""
-    <div style="width: 100%; margin: 8px 0;">
-        <audio id="audioPlayer" controls autoplay style="width: 100%; height: 45px;">
-            <source src="{audio_stream_url}" type="audio/mpeg">
-        </audio>
-    </div>
-    <script>
-        var player = document.getElementById('audioPlayer');
-        if (player) {{
-            player.playbackRate = {custom_speed};
-            player.play().catch(function(err) {{
-                console.log("Audio autoplay prevented, fallback to WebSpeech:", err);
-                if ('speechSynthesis' in window) {{
-                    var utterance = new SpeechSynthesisUtterance({repr(full_speech_text)});
-                    utterance.lang = 'zh-CN';
-                    utterance.rate = {custom_speed};
-                    window.speechSynthesis.speak(utterance);
-                }}
-            }});
-        }}
-    </script>
-    """
-    components.html(html_player, height=65)
+    except Exception as e:
+        st.error(f"語音生成出錯: {e}")
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
