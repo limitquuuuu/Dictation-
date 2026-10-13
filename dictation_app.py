@@ -3,6 +3,9 @@ import docx
 import re
 import jieba
 import time
+import base64
+import asyncio
+import edge_tts
 import streamlit.components.v1 as components
 
 # 頁面配置
@@ -101,6 +104,28 @@ def add_natural_pauses(text, is_english=False):
     else:
         return re.sub(r'([。！？；：])', r'\1，', text)
 
+# --------------------------------------------------
+# 微軟 Edge TTS 非同步生成函數（帶快取，零 429 錯誤）
+# --------------------------------------------------
+async def _generate_edge_tts_bytes(text, voice, rate_str):
+    communicate = edge_tts.Communicate(text, voice, rate=rate_str)
+    mp3_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            mp3_data += chunk["data"]
+    return mp3_data
+
+@st.cache_data(show_spinner=False)
+def get_edge_tts_b64(text, voice, rate_str):
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        mp3_bytes = loop.run_until_complete(_generate_edge_tts_bytes(text, voice, rate_str))
+        loop.close()
+        return base64.b64encode(mp3_bytes).decode('utf-8')
+    except Exception as e:
+        return None
+
 # 初始化 Session State 變數
 if "flattened_items" not in st.session_state:
     st.session_state.flattened_items = []
@@ -138,8 +163,8 @@ with st.sidebar:
         st.session_state.current_index = 0
         st.session_state.last_mode = mode
     
-    # 🎯 自由調校語速滑桿
-    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.4, max_value=1.5, value=0.75, step=0.05)
+    # 🎯 自由調校語速滑桿（百分比控制）
+    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.8, step=0.05)
     
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
 
@@ -393,69 +418,42 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 採用前端網頁內建 Web Speech API，強制鎖死普通話與自訂語速，零 429 錯誤
-    lang_tag = 'zh-CN' if not is_eng else ('en-US' if accent == "美式口音 (US)" else ('en-GB' if "英式" in accent else 'en-AU'))
+    # 🎯 微軟 Edge TTS 設定（完全支援 iPhone 普通話發音）
+    if is_eng:
+        voice_map = {
+            "美式口音 (US)": "en-US-AriaNeural",
+            "英式口音 (UK)": "en-GB-SoniaNeural",
+            "澳洲口音 (AU)": "en-AU-NatashaNeural"
+        }
+        selected_voice = voice_map.get(accent, "en-US-AriaNeural")
+    else:
+        selected_voice = "zh-CN-XiaoxiaoNeural"  # 微軟神級普通話女聲
 
-    html_code = f"""
-    <div style="width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <button onclick="speakText()" style="width: 100%; padding: 14px 6px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            🔊 重複發音 (Replay)
-        </button>
-    </div>
+    # 計算語速百分比微調字符串，例如 -20% 或 +10%
+    speed_percent = int((custom_speed - 1.0) * 100)
+    rate_str = f"{speed_percent:+d}%"
 
-    <script>
-        function speakText() {{
-            if (!('speechSynthesis' in window)) {{
-                alert("您的瀏覽器不支援語音功能");
-                return;
-            }}
-            window.speechSynthesis.cancel();
+    b64_audio = get_edge_tts_b64(full_speech_text, selected_voice, rate_str)
 
-            var text = {repr(full_speech_text)};
-            var utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = {custom_speed};
-
-            // 強制在 iPhone 及電腦上尋找標準普通話/國語聲道
-            var voices = window.speechSynthesis.getVoices();
-            if (voices && voices.length > 0) {{
-                var targetVoice = voices.find(function(v) {{
-                    var l = v.lang.toLowerCase();
-                    if ('{lang_tag}' === 'zh-CN') {{
-                        // 優先匹配普通話代碼，嚴格排除香港廣東話 (hk/yue)
-                        return (l.includes('zh-cn') || l.includes('cmn') || l.includes('zh_cn') || l.includes('mandarin')) && !l.includes('hk') && !l.includes('yue');
-                    }} else {{
-                        return l.includes('{lang_tag.lower()}');
-                    }}
+    if b64_audio:
+        html_player = f"""
+        <div style="width: 100%; margin: 8px 0;">
+            <audio id="audioPlayer" controls autoplay style="width: 100%; height: 45px;">
+                <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+            </audio>
+        </div>
+        <script>
+            var player = document.getElementById('audioPlayer');
+            if (player) {{
+                player.play().catch(function(err) {{
+                    console.log("Autoplay blocked by iOS browser:", err);
                 }});
-                
-                // 如果找不到精確 zh-cn，找任何包含 zh 但不是 hk 的聲道
-                if (!targetVoice && '{lang_tag}' === 'zh-CN') {{
-                    targetVoice = voices.find(function(v) {{
-                        var l = v.lang.toLowerCase();
-                        return l.includes('zh') && !l.includes('hk') && !l.includes('yue');
-                    }});
-                }}
-
-                if (targetVoice) {{
-                    utterance.voice = targetVoice;
-                }}
             }}
-            
-            utterance.lang = '{lang_tag}';
-            window.speechSynthesis.speak(utterance);
-        }}
-
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.onvoiceschanged = function() {{}};
-        }}
-
-        // 自動播放
-        setTimeout(function() {{
-            speakText();
-        }}, 300);
-    </script>
-    """
-    components.html(html_code, height=70)
+        </script>
+        """
+        components.html(html_player, height=65)
+    else:
+        st.error("語音生成失敗，請重新整理頁面再試。")
 
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
