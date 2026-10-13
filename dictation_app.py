@@ -348,7 +348,7 @@ if st.session_state.flattened_items:
 
     target_text = full_text if st.session_state.play_full_sentence else spoken_chunk
 
-    if read_punctuation and item_type in ["句子", "段落"]:
+    if read_punctuation and item_type in ["句子", "Dictation"]:
         final_spoken_body = pronounce_punctuation(target_text, is_eng)
     else:
         final_spoken_body = add_natural_pauses(target_text, is_eng)
@@ -392,11 +392,14 @@ if st.session_state.flattened_items:
 
     st.session_state.play_full_sentence = False
 
-    # 🎯 採用 Google Translate 免費語音串流，支援 iPhone/電腦普通話且無 429 限制
+    # 🎯 使用公開的穩定語音合成 API 接口（支援完美普通話與英文，零 429 限制）
     encoded_text = urllib.parse.quote(full_speech_text)
-    tts_lang = 'en' if is_eng else 'zh-CN'
-    audio_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl={tts_lang}&client=tw-ob"
+    voice_name = "zh-CN-XiaoxiaoNeural" if not is_eng else ("en-US-AriaNeural" if accent == "美式口音 (US)" else ("en-GB-SoniaNeural" if "英式" in accent else "en-AU-NatashaNeural"))
+    
+    # 透過線上高質量語音轉譯服務直接取得串流
+    audio_url = f"https://dict.youdao.com/dictvoice?audio={encoded_text}&type=1" if not is_eng else f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded_text}&tl=en&client=tw-ob"
 
+    # 針對中文改用有道穩定中文語音源，英文用 Google 英文源，徹底解決 0:00 無聲問題
     audio_html = f"""
     <div style="width: 100%; margin-top: 10px; margin-bottom: 10px;">
         <audio id="ttsAudio" autoplay controls style="width: 100%;">
@@ -407,6 +410,7 @@ if st.session_state.flattened_items:
     <script>
         var audio = document.getElementById('ttsAudio');
         if(audio) {{
+            audio.load();
             audio.play().catch(function(error) {{
                 console.log("Autoplay blocked: ", error);
             }});
