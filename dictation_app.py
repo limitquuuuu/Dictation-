@@ -27,7 +27,7 @@ st.markdown("""
 st.title("📚 多語言默書小幫手 (中文 / English)")
 
 # --------------------------------------------------
-# 1. 數字轉中文口語 / 英文序數文字（加入停頓符號，讓讀音拉長/字間有停頓）
+# 1. 數字轉中文口語 / 英文序數文字
 # --------------------------------------------------
 def num_to_chinese(n):
     units = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
@@ -55,7 +55,7 @@ def num_to_english_ordinal(n):
     return ordinals.get(n, f"Number {n}")
 
 # --------------------------------------------------
-# 2. 標點符號與數詞停頓轉讀音函數
+# 2. 標點符號轉讀音函數
 # --------------------------------------------------
 def pronounce_punctuation(text, is_english=False):
     if is_english:
@@ -165,8 +165,8 @@ with st.sidebar:
         st.session_state.current_index = 0
         st.session_state.last_mode = mode
     
-    # 🎯 自由調校語速滑桿
-    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.8, step=0.05)
+    # 🎯 自由調校語速滑桿（預設 0.9，更自然流暢）
+    custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.9, step=0.05)
     
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
 
@@ -365,16 +365,16 @@ if st.session_state.flattened_items:
         eng_ordinal = num_to_english_ordinal(item_no)
         if chunk_idx == 1 or st.session_state.play_full_sentence:
             if eng_item_type == "word":
-                prefix_speech = f"Word, {item_no} ... "
+                prefix_speech = f"Word {item_no}, "
             else:
-                prefix_speech = f"{eng_ordinal}, {eng_item_type} ... "
+                prefix_speech = f"{eng_ordinal} {eng_item_type}, "
         else:
             prefix_speech = ""
     else:
         chinese_num = num_to_chinese(item_no)
-        # 🎯 透過加入逗號與省略號（...），讓微軟語音在講「第」、「一」、「詞」時產生自然的長停頓
+        # 🎯 恢復流暢自然的數詞前綴讀音
         if chunk_idx == 1 or st.session_state.play_full_sentence:
-            prefix_speech = f"第 ... {chinese_num} ... {item_type} ... "
+            prefix_speech = f"第{chinese_num}{item_type}，"
         else:
             prefix_speech = ""
 
@@ -448,7 +448,6 @@ if st.session_state.flattened_items:
     b64_audio = get_edge_tts_b64(full_speech_text, selected_voice, rate_str)
 
     if b64_audio:
-        # 加上 repeat_trigger 參數確保點擊重複發音按鈕時瀏覽器會重新整理並觸發自動播放
         html_player = f"""
         <div style="width: 100%; margin: 8px 0;">
             <audio id="audioPlayer_{st.session_state.repeat_trigger}" controls autoplay style="width: 100%; height: 45px;">
