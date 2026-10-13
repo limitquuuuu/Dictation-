@@ -155,9 +155,10 @@ with st.sidebar:
     lang = st.selectbox("選擇默書語言 (Language)：", ["中文 (Chinese)", "英文 (English)"])
     lang_code = 'zh-cn' if "中文" in lang else 'en'
     
-    accent = "美式口音 (US)"
+    # 🎯 預設英文口容為英式口音 (UK)
+    accent = "英式口音 (UK)"
     if "英文" in lang:
-        accent = st.selectbox("選擇英文口音 (Accent)：", ["美式口音 (US)", "英式口音 (UK)", "澳洲口音 (AU)"])
+        accent = st.selectbox("選擇英文口音 (Accent)：", ["英式口音 (UK)", "美式口音 (US)", "澳洲口音 (AU)"])
     
     mode = st.radio("選擇默書內容：", ["全部", "詞語", "句子", "段落"])
     
@@ -165,7 +166,6 @@ with st.sidebar:
         st.session_state.current_index = 0
         st.session_state.last_mode = mode
     
-    # 🎯 自由調校語速滑桿（預設 0.9，更自然流暢）
     custom_speed = st.slider("調整發音語速 (Speed)", min_value=0.5, max_value=1.5, value=0.9, step=0.05)
     
     read_punctuation = st.checkbox("🔊 朗讀標點符號 (句子/段落)", value=True)
@@ -372,7 +372,6 @@ if st.session_state.flattened_items:
             prefix_speech = ""
     else:
         chinese_num = num_to_chinese(item_no)
-        # 🎯 恢復流暢自然的數詞前綴讀音
         if chunk_idx == 1 or st.session_state.play_full_sentence:
             prefix_speech = f"第{chinese_num}{item_type}，"
         else:
@@ -431,14 +430,14 @@ if st.session_state.flattened_items:
             st.session_state.repeat_trigger += 1
             st.rerun()
 
-    # 🎯 微軟 Edge TTS 語音生成與播放
+    # 🎯 微軟 Edge TTS 語音生成與播放 (預設英式口音)
     if is_eng:
         voice_map = {
-            "美式口音 (US)": "en-US-AriaNeural",
             "英式口音 (UK)": "en-GB-SoniaNeural",
+            "美式口音 (US)": "en-US-AriaNeural",
             "澳洲口音 (AU)": "en-AU-NatashaNeural"
         }
-        selected_voice = voice_map.get(accent, "en-US-AriaNeural")
+        selected_voice = voice_map.get(accent, "en-GB-SoniaNeural")
     else:
         selected_voice = "zh-CN-XiaoxiaoNeural"
 
